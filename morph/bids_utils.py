@@ -105,6 +105,23 @@ class DataConverter(object):
 
 
 
+class Subject(object):
+
+    def __init__(self, csv_row):
+        self.key = csv_row['Name']
+        self.data = csv_row
+        self.data_path = os.path.join(DATA_PATH, self.key)
+
+    @property
+    def export_keys(self):
+        return self.get_dict().keys()    
+
+    def set_new_key(self, key):
+        self.key = key
+
+    def get_dict(self):
+        return {'key' : self.key}
+
 class RECtoNIFTIConverter(DataConverter):
 
     def __init__(self, input_folder, target_folder):
@@ -183,7 +200,6 @@ extra_data/
             sub_key = 'sub-%02d' %(count + 1)
             subject.set_new_key(sub_key)
             participants_rows += [subject.get_dict()]
-        print(participants_rows)
         filename = os.path.join(BIDS_PATH, 'participants.tsv')
         fd = open(filename, 'w')
         csv_writer = csv.DictWriter(fd, subject.export_keys, dialect=self.dialect)
@@ -202,59 +218,207 @@ extra_data/
             subject = self[count]
 
             if os.path.exists(subject.data_path):
+                
                 sub_key = 'sub-%02d' %(count + 1)
                 bids_folder = os.path.join(BIDS_PATH, sub_key)
+
                 if not os.path.exists(bids_folder):
                     shutil.copytree(subject.data_path, bids_folder)
-                    shutil.move(os.path.join(bids_folder, 'pre'), os.path.join(bids_folder, 'ses-pre'))
-                    shutil.move(os.path.join(bids_folder, 'post'), os.path.join(bids_folder, 'ses-post'))
-
+                    
+                    shutil.rmtree(os.path.join(bids_folder, 'run 5'))    
                     subject.set_new_key(sub_key)
                     
-                    filename = os.path.join(bids_folder, '%s_sessions.tsv' %sub_key)
+                    filename = os.path.join(bids_folder, '%s_scans.tsv' %(sub_key))
                     fd = open(filename, 'w')
                     
-                    csv_writer = csv.DictWriter(fd, ['session', 'label'], dialect=self.dialect)
-                    
-                    rows = [{'session' : 'ses-pre', 'label' : 'pre'},
-                            {'session' : 'ses-post', 'label' : 'post'}]
+                    csv_writer = csv.DictWriter(fd, ['filename'], dialect=self.dialect)
+
+                    folders = os.listdir(bids_folder)
+                    rows = []
+
+                    for run_id in range(1, 5):
+                        path = os.path.join(bids_folder, f'run {run_id}')
+                        if os.path.isdir(path):
+
+                            pattern = '%s' %(sub_key)
+
+                            type_converter = self.converters['fmri'][2]
+                            task_name = f'run_{run_id}'
+                            target_folder = self.converters['fmri'][0]
+
+                            converter = type_converter(path, target_folder)
+                            converter.convert(pattern, task_name)
+                            converter.clean()
+
+                            all_files = converter.new_files
+
+                            for file in all_files:
+                                relative_path = os.path.join(os.path.basename(os.path.dirname(file)), os.path.basename(file))
+                                rows += [{'filename' : relative_path}]
+
+                    for folder in ['anat']:
+                        path = os.path.join(bids_folder, folder)
+                        if os.path.isdir(path):
+
+                            pattern = '%s' %(sub_key)
+
+                            type_converter = self.converters[folder][2]
+                            task_name = self.converters[folder][1]
+                            target_folder = self.converters[folder][0]
+
+                            converter = type_converter(path, target_folder)
+                            converter.convert(pattern, task_name)
+                            converter.clean()
+
+                            all_files = converter.new_files
+
+                            for file in all_files:
+                                relative_path = os.path.join(os.path.basename(os.path.dirname(file)), os.path.basename(file))
+                                rows += [{'filename' : relative_path}]
 
                     csv_writer.writeheader()
                     csv_writer.writerows(rows)
                     fd.close()
 
-                    for session in ['ses-pre', 'ses-post']:
-                        session_path = os.path.join(bids_folder, session)
-                        filename = os.path.join(session_path, '%s_%s_scans.tsv' %(sub_key, session))
-                        fd = open(filename, 'w')
-                    
-                        csv_writer = csv.DictWriter(fd, ['filename'], dialect=self.dialect)
-
-                        folders = os.listdir(session_path)
-                        rows = []
-
-                        for folder in folders:
-                            path = os.path.join(session_path, folder)
-                            if os.path.isdir(path):
-
-                                pattern = '%s_%s' %(sub_key, session)
-
-                                type_converter = self.converters[folder][2]
-                                task_name = self.converters[folder][1]
-                                target_folder = self.converters[folder][0]
-
-                                converter = type_converter(path, target_folder)
-                                converter.convert(pattern, task_name)
-                                converter.clean()
-
-                                all_files = converter.new_files
-
-                                for file in all_files:
-                                    relative_path = os.path.join(os.path.basename(os.path.dirname(file)), os.path.basename(file))
-                                    rows += [{'filename' : relative_path}]
-
-                        csv_writer.writeheader()
-                        csv_writer.writerows(rows)
-                        fd.close()
-
         self.write_bids_participants()
+
+
+
+class BIDSDatabase(object):
+
+    def __init__(self, bids_path, result_path, index=False):
+        import bids
+        self.bids_path = bids_path
+        self.sql_data = os.path.join(os.path.dirname(self.bids_path), 'database.bids')
+        if not os.path.exists(self.sql_data):
+            self.bids = bids.BIDSLayout(self.bids_path, validate=False, database_path=self.sql_data)
+        else:
+            if index:
+                self.bids = bids.BIDSLayout(self.bids_path, validate=False, database_path=self.sql_data, reset_database=True)
+            else:
+                self.bids = bids.BIDSLayout(self.bids_path, validate=False, database_path=self.sql_data)
+        self.result_path = result_path
+        self.participants = self.bids.get_file('participants.tsv').get_df()
+
+    def __len__(self):
+        return self.nb_subjects
+
+    @property
+    def nb_subjects(self):
+        return len(self.participants)
+
+    def _get_result_path(self, root_folder, subject, data_type, area=None):
+        assert data_type in ['func', 'anat', 'dwi', 'extra_data']
+        subject = self._get_subject_key(subject, 'sub-')
+        path = os.path.join(self.result_path, root_folder, subject, data_type)
+        
+        if not os.path.exists(path):
+            os.makedirs(path)
+        return path
+
+    def slice_subjects(self, filters=None, as_string=False):
+        res = self.participants
+        if filters is not None:
+            cond = None
+            for key, value in filters.items():
+                if cond is None:
+                    cond = getattr(self.participants, key) == value
+                else:
+                    cond *= getattr(self.participants, key) == value
+            res = res[cond]
+
+        if as_string:
+            data = list(bids_data.participants.key[cond].values)
+            result = [i.replace('sub-', '') for i in data]
+        else:
+            result = res.index
+        return result
+
+    def _get_subject_key(self, subject, prefix=None):
+        if type(subject) == int:
+            subject = '%02d' %subject
+
+        if prefix is not None:
+            subject = prefix + subject
+        return subject
+
+    def _get_anat_path(self, root_folder, subject,):
+        subject = self._get_subject_key(subject, 'sub-')
+        path = os.path.join(self.result_path, root_folder, subject, 'anat')
+        
+        if not os.path.exists(path):
+            os.makedirs(path)
+        return path
+
+
+    def _get_all(self, data, subjects=None, verbose=False, filters=None):
+        result = {}
+        
+        if subjects is None:
+            subjects = range(1, self.nb_subjects+1)
+
+        if filters is not None:
+            subjects = self.slice_subjects(filters)
+
+        for subject in subjects:
+            subject = self._get_subject_key(subject)
+            if data == 'tms':
+                result[subject] = self.get_tms(int(subject), verbose)
+
+        return result
+
+    def _get_filename(self, data, subject):
+        subject = self._get_subject_key(subject)
+        filename = self.bids.get(return_type='filename', subject=subject, datatype=data, extension='nii.gz')[0]
+        return filename
+
+    def get_anat(self, subject, verbose=False):
+        if verbose:
+            print('Loading anat sequence for subject', subject)
+        result_path = self._get_anat_path('fmriprep', subject)
+        try:
+            anat = mri.ANAT(self._get_filename('anat', subject), result_path)
+            anat.set_session_path(self._get_anat_path('fmriprep', subject))
+            return anat
+        except Exception:
+            return None
+
+    def get_func(self, subject, verbose=False):
+        if verbose:
+            print('Loading bold sequence for subject', subject)
+        result_path = self._get_result_path('fmriprep', subject, 'func')
+        try:
+            return mri.MRI(self._get_filename('func', subject), result_path)
+        except Exception:
+            return None
+
+    def get_all_func(self, subjects=None, verbose=False, filters=None):
+        return self._get_all_partial('func', subjects, verbose, filters)
+
+    def get_all_anat(self, subjects=None, verbose=False, filters=None):
+        return self._get_all_partial('anat', subjects, verbose, filters)
+
+    def launch_fmriprep(self, use_aroma=False, nprocs=-1, subset=None):
+        work_folder = os.path.join(os.path.dirname(self.bids_path), 'work')
+
+        command = 'fmriprep-docker %s %s participant -w %s --nthreads %d --verbose' %(self.bids_path, self.result_path, work_folder, nprocs)
+
+        all_funcs = self.bids.get(datatype='func')
+        all_subjects = []
+        for func in all_funcs:
+            if func.subject not in all_subjects:
+                all_subjects += [func.subject]
+
+        if subset == 'odd':
+            command += ' --participant-label '
+            command += ' '.join(all_subjects[::2])
+        elif subset == 'not-odd':
+            command += ' --participant-label '
+            command += ' '.join(all_subjects[1::2])
+        elif subset == 'all':
+            command += ' --participant-label '
+            command += ' '.join(all_subjects)
+
+        if use_aroma:
+            command += ' --use-aroma'
+        os.system(command)
