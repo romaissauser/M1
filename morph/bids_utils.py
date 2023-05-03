@@ -7,8 +7,8 @@ import time
 import json
 
 GLOBAL_PATH = os.path.abspath('.')
-DATA_PATH = os.path.join(GLOBAL_PATH, "data/raw")
-BIDS_PATH = os.path.join(GLOBAL_PATH, "data/bids")
+DATA_PATH = os.path.join(GLOBAL_PATH, "raw_data")
+BIDS_PATH = os.path.join(GLOBAL_PATH, "bids")
 
 
 def gvalue(csv_row, keys):
@@ -225,7 +225,9 @@ extra_data/
                 if not os.path.exists(bids_folder):
                     shutil.copytree(subject.data_path, bids_folder)
                     
-                    shutil.rmtree(os.path.join(bids_folder, 'run 5'))    
+                    shutil.rmtree(os.path.join(bids_folder, 'run 5'))
+                    #print('rm %s/*.xlsx' %bids_folder)
+                    os.system('rm %s/*.xlsx' %bids_folder)
                     subject.set_new_key(sub_key)
                     
                     filename = os.path.join(bids_folder, '%s_scans.tsv' %(sub_key))
@@ -243,7 +245,7 @@ extra_data/
                             pattern = '%s' %(sub_key)
 
                             type_converter = self.converters['fmri'][2]
-                            task_name = f'run_{run_id}'
+                            task_name = f'task-morph_run-{run_id}_bold'
                             target_folder = self.converters['fmri'][0]
 
                             converter = type_converter(path, target_folder)
@@ -398,11 +400,13 @@ class BIDSDatabase(object):
     def get_all_anat(self, subjects=None, verbose=False, filters=None):
         return self._get_all_partial('anat', subjects, verbose, filters)
 
-    def launch_fmriprep(self, use_aroma=False, nprocs=-1, subset=None):
-        work_folder = os.path.join(os.path.dirname(self.bids_path), 'work')
+    def launch_fmriprep(self, use_aroma=False, nprocs=72, subset=None, work_folder=None):
+        if work_folder is None:
+            work_folder = os.path.join(os.path.dirname(self.bids_path), 'work')
 
         command = 'fmriprep-docker %s %s participant -w %s --nthreads %d --verbose' %(self.bids_path, self.result_path, work_folder, nprocs)
 
+        print(command)
         all_funcs = self.bids.get(datatype='func')
         all_subjects = []
         for func in all_funcs:
