@@ -5,6 +5,7 @@ import shutil
 import nibabel
 import time
 import json
+import mri
 
 GLOBAL_PATH = os.path.abspath('.')
 DATA_PATH = os.path.join(GLOBAL_PATH, "raw_data")
@@ -309,10 +310,10 @@ class BIDSDatabase(object):
     def nb_subjects(self):
         return len(self.participants)
 
-    def _get_result_path(self, root_folder, subject, data_type, area=None):
-        assert data_type in ['func', 'anat', 'dwi', 'extra_data']
+    def _get_result_path(self, subject, data_type):
+        assert data_type in ['func', 'anat', 'extra_data']
         subject = self._get_subject_key(subject, 'sub-')
-        path = os.path.join(self.result_path, root_folder, subject, data_type)
+        path = os.path.join(self.result_path, subject, data_type)
         
         if not os.path.exists(path):
             os.makedirs(path)
@@ -344,16 +345,15 @@ class BIDSDatabase(object):
             subject = prefix + subject
         return subject
 
-    def _get_anat_path(self, root_folder, subject,):
+    def _get_anat_path(self, subject):
         subject = self._get_subject_key(subject, 'sub-')
-        path = os.path.join(self.result_path, root_folder, subject, 'anat')
+        path = os.path.join(self.result_path, subject, 'anat')
         
         if not os.path.exists(path):
             os.makedirs(path)
         return path
 
-
-    def _get_all(self, data, subjects=None, verbose=False, filters=None):
+    def _get_all_partial(self, data, subjects=None, verbose=False, filters=None):
         result = {}
         
         if subjects is None:
@@ -364,41 +364,36 @@ class BIDSDatabase(object):
 
         for subject in subjects:
             subject = self._get_subject_key(subject)
-            if data == 'tms':
-                result[subject] = self.get_tms(int(subject), verbose)
-
+            if data == 'func':
+                result[subject] = self.get_func(subject, verbose)
+            elif data == 'anat':
+                result[subject] = self.get_anat(subject, verbose)
         return result
 
-    def _get_filename(self, data, subject):
+    def _get_filenames(self, data, subject):
         subject = self._get_subject_key(subject)
-        filename = self.bids.get(return_type='filename', subject=subject, datatype=data, extension='nii.gz')[0]
-        return filename
+        filenames = self.bids.get(return_type='filename', subject=subject, datatype=data, extension='nii.gz')
+        return filenames
 
-    def get_anat(self, subject, verbose=False):
-        if verbose:
-            print('Loading anat sequence for subject', subject)
-        result_path = self._get_anat_path('fmriprep', subject)
-        try:
-            anat = mri.ANAT(self._get_filename('anat', subject), result_path)
-            anat.set_session_path(self._get_anat_path('fmriprep', subject))
-            return anat
-        except Exception:
-            return None
 
     def get_func(self, subject, verbose=False):
         if verbose:
             print('Loading bold sequence for subject', subject)
-        result_path = self._get_result_path('fmriprep', subject, 'func')
-        try:
-            return mri.MRI(self._get_filename('func', subject), result_path)
-        except Exception:
-            return None
+
+        result_path = self._get_result_path(subject, 'func')
+        
+        files = self._get_filenames('func', subject)
+        res = []
+        for file in files:
+            try:
+                res += [mri.MRI(file, result_path)]
+            except Exception:
+                res += [None]
+        return res
 
     def get_all_func(self, subjects=None, verbose=False, filters=None):
         return self._get_all_partial('func', subjects, verbose, filters)
 
-    def get_all_anat(self, subjects=None, verbose=False, filters=None):
-        return self._get_all_partial('anat', subjects, verbose, filters)
 
     def launch_fmriprep(self, use_aroma=False, nprocs=72, subset=None, work_folder=None):
         if work_folder is None:
