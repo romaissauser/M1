@@ -421,3 +421,28 @@ class BIDSDatabase(object):
         if use_aroma:
             command += ' --use-aroma'
         os.system(command)
+
+    def launch_xcp_d(self, nprocs=72, subset=None, work_folder=None):
+        if work_folder is None:
+            work_folder = os.path.join(os.path.dirname(self.bids_path), 'work')
+
+        command = 'xcp_d %s %s participant -w %s --nthreads %d --verbose --despike' %(self.bids_path, self.result_path, work_folder, nprocs)
+
+        print(command)
+        all_funcs = self.bids.get(datatype='func')
+        all_subjects = []
+        for func in all_funcs:
+            if func.subject not in all_subjects:
+                all_subjects += [func.subject]
+
+        if subset == 'odd':
+            command += ' --participant-label '
+            command += ' '.join(all_subjects[::2])
+        elif subset == 'not-odd':
+            command += ' --participant-label '
+            command += ' '.join(all_subjects[1::2])
+        elif subset == 'all':
+            command += ' --participant-label '
+            command += ' '.join(all_subjects)
+
+        os.system(command)
