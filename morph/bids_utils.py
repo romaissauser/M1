@@ -144,6 +144,23 @@ class RECtoNIFTIConverter(DataConverter):
                 par_file = file_no_extension + ext
                 if os.path.exists(par_file):
                     os.remove(par_file)
+
+class DICOMtoNIFTIConverter(DataConverter):
+
+    def __init__(self, input_folder, target_folder):
+        DataConverter.__init__(self, input_folder, target_folder)
+
+    def convert(self, pattern, extension):
+        nifti_file = os.path.join(pattern + '_' + extension)
+        os.system('dcm2niix -b y -z y -i n -f "%s" -o "%s" "%s"' %(nifti_file, self.output_folder, self.input_folder))
+        self._new_files += [os.path.join(self.output_folder, nifti_file + '.nii.gz')]
+        #self._old_files += [file]
+
+    def _clean(self):
+        for file in os.listdir(self.input_folder):
+            file_no_extension, ext = os.path.splitext(file)
+            if ext == '.dcm':
+                os.remove(os.path.join(self.input_folder, file))
     
 
 class DataBaseReader(object):
@@ -154,7 +171,7 @@ class DataBaseReader(object):
         self.converters = converters
 
         csvfile = open(os.path.abspath(self.database), newline='')
-        reader = csv.DictReader(csvfile)
+        reader = csv.DictReader(csvfile, delimiter='\t')
         self.dialect = csv.excel
         self.dialect.delimiter = '\t'
         self.subjects = {}
@@ -226,7 +243,7 @@ extra_data/
                 if not os.path.exists(bids_folder):
                     shutil.copytree(subject.data_path, bids_folder)
                     
-                    shutil.rmtree(os.path.join(bids_folder, 'run 5'))
+                    #shutil.rmtree(os.path.join(bids_folder, 'run 5'))
                     #print('rm %s/*.xlsx' %bids_folder)
                     os.system('rm %s/*.xlsx' %bids_folder)
                     subject.set_new_key(sub_key)
@@ -239,19 +256,30 @@ extra_data/
                     folders = os.listdir(bids_folder)
                     rows = []
 
-                    for run_id in range(1, 5):
+                    for run_id in range(1, 6):
                         path = os.path.join(bids_folder, f'run {run_id}')
                         if os.path.isdir(path):
 
                             pattern = '%s' %(sub_key)
 
-                            type_converter = self.converters['fmri'][2]
-                            task_name = f'task-morph_run-{run_id}_bold'
-                            target_folder = self.converters['fmri'][0]
+                            files = os.listdir(path)
 
-                            converter = type_converter(path, target_folder)
-                            converter.convert(pattern, task_name)
-                            converter.clean()
+                            if len(files) == 2:
+                                type_converter = self.converters['fmri'][2]
+                                task_name = f'task-morph_run-{run_id}_bold'
+                                target_folder = self.converters['fmri'][0]
+                                print(path, target_folder)
+                                converter = type_converter(path, target_folder)
+                                converter.convert(pattern, task_name)
+                                converter.clean()
+                            else:
+                                type_converter = DICOMtoNIFTIConverter
+                                task_name = f'task-morph_run-{run_id}_bold'
+                                target_folder = self.converters['fmri'][0]
+                                print(path, target_folder)
+                                converter = type_converter(path, target_folder)
+                                converter.convert(pattern, task_name)
+                                converter.clean()
 
                             all_files = converter.new_files
 
@@ -265,13 +293,24 @@ extra_data/
 
                             pattern = '%s' %(sub_key)
 
-                            type_converter = self.converters[folder][2]
-                            task_name = self.converters[folder][1]
-                            target_folder = self.converters[folder][0]
+                            files = os.listdir(path)
 
-                            converter = type_converter(path, target_folder)
-                            converter.convert(pattern, task_name)
-                            converter.clean()
+                            if len(files) == 2:
+                                type_converter = self.converters[folder][2]
+                                task_name = self.converters[folder][1]
+                                target_folder = self.converters[folder][0]
+                                print(path, target_folder)
+                                converter = type_converter(path, target_folder)
+                                converter.convert(pattern, task_name)
+                                converter.clean()
+                            else:
+                                type_converter = DICOMtoNIFTIConverter
+                                task_name = self.converters[folder][1]
+                                target_folder = self.converters[folder][0]
+                                print(path, target_folder)
+                                converter = type_converter(path, target_folder)
+                                converter.convert(pattern, task_name)
+                                converter.clean()
 
                             all_files = converter.new_files
 
@@ -399,7 +438,7 @@ class BIDSDatabase(object):
         if work_folder is None:
             work_folder = os.path.join(os.path.dirname(self.bids_path), 'work')
 
-        command = 'fmriprep-docker %s %s participant -w %s --nthreads %d --verbose' %(self.bids_path, self.result_path, work_folder, nprocs)
+        command = 'fmriprep-docker %s %s participant -w %s --nthreads %d --verbose --notrack' %(self.bids_path, self.result_path, work_folder, nprocs)
 
         print(command)
         all_funcs = self.bids.get(datatype='func')
